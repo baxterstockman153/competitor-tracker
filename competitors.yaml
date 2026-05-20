@@ -1,0 +1,16 @@
+companies:
+  - name: GenHealth
+    careers_url: https://boards-api.greenhouse.io/v1/boards/genhealth/jobs?content=true
+    ats_provider: greenhouse
+  - name: Cohere Health
+    careers_url: https://api.lever.co/v0/postings/coherehealth?mode=json
+    ats_provider: lever
+  - name: AKASA
+    careers_url: https://api.lever.co/v0/postings/akasa?mode=json
+    ats_provider: lever
+  - name: Humata
+    careers_url: https://api.lever.co/v0/postings/humata?mode=json
+    ats_provider: lever
+  - name: Anterior
+    careers_url: https://boards-api.greenhouse.io/v1/boards/anterior/jobs?content=true
+    ats_provider: greenhouse
