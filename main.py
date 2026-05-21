@@ -59,11 +59,13 @@ def jobs(
 
 
 @app.command()
-def weekly() -> None:
+def weekly(
+    output: str = typer.Option("text", "--output", "-o", help="Output format: text or markdown"),
+) -> None:
     """Generate a weekly competitor hiring summary report."""
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as session:
-        typer.echo(generate_weekly_report(session))
+        typer.echo(generate_weekly_report(session, output_format=output))
 
 
 @app.command()

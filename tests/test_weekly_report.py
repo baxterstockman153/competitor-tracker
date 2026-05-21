@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import pytest
 from sqlalchemy import select
 
 from app.config import CompanyConfig
@@ -147,6 +148,13 @@ class TestWhatsClosed:
         result = generate_weekly_report(session)
         assert "WHAT CLOSED" in result
         assert "Designer" in result
+
+
+class TestInvalidOutputFormat:
+    def test_invalid_output_format(self, session):
+        scrape_with_jobs(session, [make_job("1", "Engineer")])
+        with pytest.raises(ValueError, match="Unsupported output format"):
+            generate_weekly_report(session, output_format="csv")
 
 
 class TestEmptySectionsOmitted:

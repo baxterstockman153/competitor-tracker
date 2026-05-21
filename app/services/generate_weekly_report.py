@@ -1,149 +1,147 @@
-from datetime import timedelta
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.analysis.diff import compute_company_diff
-from app.analysis.signals import detect_signals
-from app.analysis.stats import compute_summary_stats
+from app.analysis.signals import StrategicSignal, detect_signals
+from app.analysis.stats import CompanyStats, SummaryStats, compute_summary_stats
 from app.db.models import Company, JobChange, JobPosting, ScrapeRun
 
 
-def generate_weekly_report(session: Session) -> str:
+@dataclass
+class WeeklyReportData:
+    start_date: datetime
+    end_date: datetime
+    stats: SummaryStats
+    signals: list[StrategicSignal]
+    movers: list[CompanyStats]
+    new_jobs: dict[str, list[tuple[str, str | None]]]  # company -> [(title, location)]
+    removed_jobs: dict[str, list[str]]  # company -> [title]
+
+
+def build_weekly_report_data(session: Session) -> WeeklyReportData | None:
     scrape_run = session.scalar(
         select(ScrapeRun).order_by(ScrapeRun.started_at.desc()).limit(1)
     )
     if scrape_run is None:
-        return "No scrape runs found. Run 'python main.py scrape' first."
+        return None
 
     companies = session.scalars(select(Company).order_by(Company.name.asc())).all()
     stats = compute_summary_stats(session, scrape_run)
     signals = detect_signals(session, scrape_run)
     diffs = {c.name: compute_company_diff(session, c, scrape_run) for c in companies}
 
-    # Build location lookup for new/removed jobs via JobChange -> JobPosting
-    location_lookup = _build_location_lookup(session, scrape_run)
-
-    sections: list[str] = []
-
-    # Section 1: Header
-    end_date = scrape_run.started_at
-    start_date = end_date - timedelta(days=7)
-    sections.append(
-        f"=== WEEKLY COMPETITOR HIRING REPORT ({start_date.strftime('%b %d')}–{end_date.strftime('%b %d, %Y')}) ==="
-    )
-
-    # Section 2: Headline Numbers
-    sections.append(_headline_numbers(stats))
-
-    # Section 3: Strategic Signals
-    if signals:
-        lines = ["", "STRATEGIC SIGNALS"]
-        for s in signals:
-            lines.append(f"[{s.severity}] {s.signal}")
-        sections.append("\n".join(lines))
-
-    # Section 4: Top Movers
-    movers = _top_movers(stats)
-    if movers:
-        sections.append("\n" + movers)
-
-    # Section 5: What's New
-    new_section = _whats_new(diffs, location_lookup)
-    if new_section:
-        sections.append("\n" + new_section)
-
-    # Section 6: What Closed
-    closed_section = _whats_closed(diffs)
-    if closed_section:
-        sections.append("\n" + closed_section)
-
-    return "\n".join(sections)
-
-
-def _build_location_lookup(session: Session, scrape_run: ScrapeRun) -> dict[tuple[int, str], str | None]:
-    """Map (company_id, title) -> location for changes in this scrape run."""
+    # Location lookup
     rows = session.execute(
         select(JobChange.company_id, JobChange.title, JobPosting.location)
         .outerjoin(JobPosting, JobChange.job_posting_id == JobPosting.id)
         .where(JobChange.scrape_run_id == scrape_run.id)
     ).all()
-    return {(row.company_id, row.title): row.location for row in rows}
+    title_to_location: dict[str, str | None] = {row.title: row.location for row in rows}
+
+    # Movers
+    movers = [c for c in stats.companies if c.net_change != 0]
+    movers.sort(key=lambda c: abs(c.net_change), reverse=True)
+
+    # New jobs
+    new_jobs: dict[str, list[tuple[str, str | None]]] = {}
+    for company_name, diff in sorted(diffs.items()):
+        if diff.new_jobs:
+            new_jobs[company_name] = [
+                (title, title_to_location.get(title)) for title in diff.new_jobs
+            ]
+
+    # Removed jobs
+    removed_jobs: dict[str, list[str]] = {}
+    for company_name, diff in sorted(diffs.items()):
+        if diff.removed_jobs:
+            removed_jobs[company_name] = diff.removed_jobs
+
+    return WeeklyReportData(
+        start_date=scrape_run.started_at - timedelta(days=7),
+        end_date=scrape_run.started_at,
+        stats=stats,
+        signals=signals,
+        movers=movers,
+        new_jobs=new_jobs,
+        removed_jobs=removed_jobs,
+    )
 
 
-def _headline_numbers(stats) -> str:
+def format_weekly_text(data: WeeklyReportData) -> str:
+    sections: list[str] = []
+
+    # Header
+    sections.append(
+        f"=== WEEKLY COMPETITOR HIRING REPORT ({data.start_date.strftime('%b %d')}–{data.end_date.strftime('%b %d, %Y')}) ==="
+    )
+
+    # Headline Numbers
+    stats = data.stats
     lines = ["", "HEADLINE NUMBERS"]
     n_companies = len(stats.companies)
-
     wow_companies = [c for c in stats.companies if c.active_jobs_7d_ago is not None]
     if wow_companies:
         total_7d_ago = sum(c.active_jobs_7d_ago for c in wow_companies)
         wow_delta = stats.total_active_jobs - total_7d_ago
-        lines.append(
-            f"Total active across {n_companies} companies: {stats.total_active_jobs} ({wow_delta:+d} vs last week)"
-        )
+        lines.append(f"Total active across {n_companies} companies: {stats.total_active_jobs} ({wow_delta:+d} vs last week)")
     else:
         lines.append(f"Total active across {n_companies} companies: {stats.total_active_jobs}")
+    lines.append(f"New postings: {stats.total_new} | Removed: {stats.total_removed} | Net: {stats.total_net_change:+d}")
+    sections.append("\n".join(lines))
 
-    lines.append(
-        f"New postings: {stats.total_new} | Removed: {stats.total_removed} | Net: {stats.total_net_change:+d}"
-    )
-    return "\n".join(lines)
+    # Strategic Signals
+    if data.signals:
+        lines = ["", "STRATEGIC SIGNALS"]
+        for s in data.signals:
+            lines.append(f"[{s.severity}] {s.signal}")
+        sections.append("\n".join(lines))
 
+    # Top Movers
+    if data.movers:
+        lines = ["", "TOP MOVERS"]
+        for c in data.movers:
+            annotation = "net growth" if c.net_change > 0 else "net reduction"
+            if c.wow_delta is not None:
+                lines.append(f"{c.company_name}: {c.active_jobs} active ({c.wow_delta:+d} WoW) — {annotation}")
+            else:
+                lines.append(f"{c.company_name}: {c.active_jobs} active ({c.net_change:+d} net) — {annotation}")
+        sections.append("\n".join(lines))
 
-def _top_movers(stats) -> str | None:
-    movers = [c for c in stats.companies if c.net_change != 0]
-    if not movers:
-        return None
-
-    movers.sort(key=lambda c: abs(c.net_change), reverse=True)
-
-    lines = ["TOP MOVERS"]
-    for c in movers:
-        annotation = "net growth" if c.net_change > 0 else "net reduction"
-        if c.wow_delta is not None:
-            lines.append(f"{c.company_name}: {c.active_jobs} active ({c.wow_delta:+d} WoW) — {annotation}")
-        else:
-            lines.append(f"{c.company_name}: {c.active_jobs} active ({c.net_change:+d} net) — {annotation}")
-    return "\n".join(lines)
-
-
-def _whats_new(
-    diffs: dict[str, object],
-    location_lookup: dict[tuple[int, str], str | None],
-) -> str | None:
-    lines = ["WHAT'S NEW"]
-    any_new = False
-
-    title_to_location: dict[str, str | None] = {}
-    for (_company_id, title), location in location_lookup.items():
-        title_to_location[title] = location
-
-    for company_name, diff in sorted(diffs.items()):
-        if diff.new_jobs:
-            any_new = True
+    # What's New
+    if data.new_jobs:
+        lines = ["", "WHAT'S NEW"]
+        for company_name, jobs in sorted(data.new_jobs.items()):
             lines.append(f"{company_name}:")
-            for title in diff.new_jobs:
-                loc = title_to_location.get(title)
-                loc_str = f" — {loc}" if loc else ""
+            for title, location in jobs:
+                loc_str = f" — {location}" if location else ""
                 lines.append(f"  + {title}{loc_str}")
+        sections.append("\n".join(lines))
 
-    if not any_new:
-        return None
-    return "\n".join(lines)
-
-
-def _whats_closed(diffs: dict[str, object]) -> str | None:
-    lines = ["WHAT CLOSED"]
-    any_removed = False
-
-    for company_name, diff in sorted(diffs.items()):
-        if diff.removed_jobs:
-            any_removed = True
+    # What Closed
+    if data.removed_jobs:
+        lines = ["", "WHAT CLOSED"]
+        for company_name, titles in sorted(data.removed_jobs.items()):
             lines.append(f"{company_name}:")
-            for title in diff.removed_jobs:
+            for title in titles:
                 lines.append(f"  - {title}")
+        sections.append("\n".join(lines))
 
-    if not any_removed:
-        return None
-    return "\n".join(lines)
+    return "\n".join(sections)
+
+
+def generate_weekly_report(session: Session, output_format: str = "text") -> str:
+    if output_format not in ("text", "markdown"):
+        raise ValueError(f"Unsupported output format: {output_format!r}. Must be 'text' or 'markdown'.")
+
+    data = build_weekly_report_data(session)
+    if data is None:
+        return "No scrape runs found. Run 'python main.py scrape' first."
+
+    if output_format == "markdown":
+        from app.services.format_weekly_markdown import format_weekly_markdown
+        return format_weekly_markdown(data)
+
+    return format_weekly_text(data)
