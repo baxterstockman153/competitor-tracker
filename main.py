@@ -8,6 +8,7 @@ from app.db.session import SessionLocal, engine
 from app.services.generate_diff_report import generate_report
 from app.services.generate_jobs_report import generate_jobs_report
 from app.services.generate_stats_report import generate_stats_report
+from app.services.generate_weekly_report import generate_weekly_report
 from app.services.scrape_company import scrape_company
 
 app = typer.Typer(help="Local competitor hiring tracker MVP")
@@ -55,6 +56,14 @@ def jobs(
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as session:
         typer.echo(generate_jobs_report(session, function_filter=function, domain_filter=domain, group_by=group_by))
+
+
+@app.command()
+def weekly() -> None:
+    """Generate a weekly competitor hiring summary report."""
+    Base.metadata.create_all(bind=engine)
+    with SessionLocal() as session:
+        typer.echo(generate_weekly_report(session))
 
 
 @app.command()
