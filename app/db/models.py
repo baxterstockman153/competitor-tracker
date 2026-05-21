@@ -37,6 +37,7 @@ class JobPosting(Base):
 
     company: Mapped[Company] = relationship(back_populates="jobs")
     snapshots: Mapped[list["JobSnapshot"]] = relationship(back_populates="job_posting")
+    tags: Mapped[list["JobTag"]] = relationship(back_populates="job_posting", cascade="all, delete-orphan")
 
 
 class JobSnapshot(Base):
@@ -60,6 +61,21 @@ class ScrapeRun(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class JobTag(Base):
+    __tablename__ = "job_tags"
+    __table_args__ = (
+        UniqueConstraint("job_posting_id", "tag_type", "tag_value", name="uq_job_tag"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_posting_id: Mapped[int] = mapped_column(ForeignKey("job_postings.id"), nullable=False)
+    tag_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    tag_value: Mapped[str] = mapped_column(String(100), nullable=False)
+    tag_source: Mapped[str] = mapped_column(String(50), nullable=False, default="deterministic")
+
+    job_posting: Mapped["JobPosting"] = relationship(back_populates="tags")
 
 
 class JobChange(Base):

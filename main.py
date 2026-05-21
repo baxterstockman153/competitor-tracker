@@ -6,6 +6,7 @@ from app.config import load_config
 from app.db.models import Base, ScrapeRun
 from app.db.session import SessionLocal, engine
 from app.services.generate_diff_report import generate_report
+from app.services.generate_stats_report import generate_stats_report
 from app.services.scrape_company import scrape_company
 
 app = typer.Typer(help="Local competitor hiring tracker MVP")
@@ -41,6 +42,14 @@ def report() -> None:
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as session:
         typer.echo(generate_report(session))
+
+
+@app.command()
+def stats() -> None:
+    """Show summary statistics for the latest scrape run."""
+    Base.metadata.create_all(bind=engine)
+    with SessionLocal() as session:
+        typer.echo(generate_stats_report(session))
 
 
 if __name__ == "__main__":

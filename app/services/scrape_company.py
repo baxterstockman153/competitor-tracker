@@ -4,9 +4,31 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.classification.classifier import classify_job
 from app.config import CompanyConfig
-from app.db.models import Company, JobChange, JobPosting, JobSnapshot, ScrapeRun
+from app.db.models import Company, JobChange, JobPosting, JobSnapshot, JobTag, ScrapeRun
 from app.scrapers.factory import get_scraper
+
+
+def _apply_tags(session: Session, job: JobPosting, title: str, description: str, location: str | None) -> None:
+    classification = classify_job(title, description, location)
+
+    # Delete existing deterministic tags only
+    session.query(JobTag).filter(
+        JobTag.job_posting_id == job.id,
+        JobTag.tag_source == "deterministic",
+    ).delete()
+
+    tags = [
+        JobTag(job_posting_id=job.id, tag_type="function", tag_value=classification.function, tag_source="deterministic"),
+        JobTag(job_posting_id=job.id, tag_type="seniority", tag_value=classification.seniority, tag_source="deterministic"),
+        JobTag(job_posting_id=job.id, tag_type="seniority_track", tag_value=classification.seniority_track, tag_source="deterministic"),
+        JobTag(job_posting_id=job.id, tag_type="geography", tag_value=classification.geography, tag_source="deterministic"),
+    ]
+    for domain in classification.domain_tags:
+        tags.append(JobTag(job_posting_id=job.id, tag_type="domain", tag_value=domain, tag_source="deterministic"))
+
+    session.add_all(tags)
 
 
 def _hash_description(description: str) -> str:
@@ -79,6 +101,7 @@ def scrape_company(session: Session, company_config: CompanyConfig, scrape_run: 
                 created_at=now,
             )
             session.add(change)
+            _apply_tags(session, job, scraped_job.title, scraped_job.description, scraped_job.location)
             continue
 
         description_changed = job.current_description_hash != description_hash
@@ -109,6 +132,9 @@ def scrape_company(session: Session, company_config: CompanyConfig, scrape_run: 
                 scraped_at=now,
             )
             session.add(snapshot)
+
+        if description_changed or metadata_changed:
+            _apply_tags(session, job, scraped_job.title, scraped_job.description, scraped_job.location)
 
         if description_changed:
             change = JobChange(

@@ -1,52 +1,14 @@
-from datetime import datetime, timezone
-from unittest.mock import patch
-
 from sqlalchemy import select
 
-from app.config import CompanyConfig
-from app.db.models import Company, JobChange, JobPosting, ScrapeRun
-from app.schemas.job import NormalizedJob
-from app.services.scrape_company import scrape_company
+from app.db.models import JobChange
 
-
-def _make_config() -> CompanyConfig:
-    return CompanyConfig(
-        name="TestCo",
-        careers_url="https://example.com/careers",
-        ats_provider="greenhouse",
-    )
-
-
-def _make_job(external_id: str, title: str, description: str = "desc") -> NormalizedJob:
-    return NormalizedJob(
-        external_id=external_id,
-        title=title,
-        description=description,
-        url="https://example.com/jobs/" + external_id,
-    )
-
-
-def _make_scrape_run(session) -> ScrapeRun:
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    run = ScrapeRun(started_at=now)
-    session.add(run)
-    session.flush()
-    return run
-
-
-def _scrape_with_jobs(session, jobs: list[NormalizedJob]) -> ScrapeRun:
-    run = _make_scrape_run(session)
-    with patch("app.services.scrape_company.get_scraper") as mock_get:
-        mock_get.return_value.fetch_jobs.return_value = jobs
-        scrape_company(session, _make_config(), run)
-    session.flush()
-    return run
+from tests.conftest import make_job, scrape_with_jobs
 
 
 class TestNewJobsDetected:
     def test_new_jobs_on_first_scrape(self, session):
-        jobs = [_make_job("1", "Engineer"), _make_job("2", "Designer")]
-        run = _scrape_with_jobs(session, jobs)
+        jobs = [make_job("1", "Engineer"), make_job("2", "Designer")]
+        run = scrape_with_jobs(session, jobs)
 
         changes = session.scalars(
             select(JobChange).where(JobChange.scrape_run_id == run.id)
@@ -57,10 +19,10 @@ class TestNewJobsDetected:
 
 class TestNewJobsNotRepeated:
     def test_no_new_changes_on_second_scrape(self, session):
-        jobs = [_make_job("1", "Engineer"), _make_job("2", "Designer")]
-        _scrape_with_jobs(session, jobs)
+        jobs = [make_job("1", "Engineer"), make_job("2", "Designer")]
+        scrape_with_jobs(session, jobs)
 
-        run2 = _scrape_with_jobs(session, jobs)
+        run2 = scrape_with_jobs(session, jobs)
         changes = session.scalars(
             select(JobChange).where(JobChange.scrape_run_id == run2.id)
         ).all()
@@ -69,10 +31,10 @@ class TestNewJobsNotRepeated:
 
 class TestRemovedJobsDetected:
     def test_removed_job_creates_change(self, session):
-        jobs = [_make_job("1", "Engineer")]
-        _scrape_with_jobs(session, jobs)
+        jobs = [make_job("1", "Engineer")]
+        scrape_with_jobs(session, jobs)
 
-        run2 = _scrape_with_jobs(session, [])
+        run2 = scrape_with_jobs(session, [])
         changes = session.scalars(
             select(JobChange).where(JobChange.scrape_run_id == run2.id)
         ).all()
@@ -83,11 +45,11 @@ class TestRemovedJobsDetected:
 
 class TestUpdatedJobsDetected:
     def test_updated_description_creates_change(self, session):
-        jobs = [_make_job("1", "Engineer", description="old description")]
-        _scrape_with_jobs(session, jobs)
+        jobs = [make_job("1", "Engineer", description="old description")]
+        scrape_with_jobs(session, jobs)
 
-        updated_jobs = [_make_job("1", "Engineer", description="new description")]
-        run2 = _scrape_with_jobs(session, updated_jobs)
+        updated_jobs = [make_job("1", "Engineer", description="new description")]
+        run2 = scrape_with_jobs(session, updated_jobs)
 
         changes = session.scalars(
             select(JobChange).where(JobChange.scrape_run_id == run2.id)
@@ -98,10 +60,10 @@ class TestUpdatedJobsDetected:
 
 class TestNoChangeProducesEmptyReport:
     def test_identical_scrape_no_changes(self, session):
-        jobs = [_make_job("1", "Engineer"), _make_job("2", "Designer")]
-        _scrape_with_jobs(session, jobs)
+        jobs = [make_job("1", "Engineer"), make_job("2", "Designer")]
+        scrape_with_jobs(session, jobs)
 
-        run2 = _scrape_with_jobs(session, jobs)
+        run2 = scrape_with_jobs(session, jobs)
         changes = session.scalars(
             select(JobChange).where(JobChange.scrape_run_id == run2.id)
         ).all()
