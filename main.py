@@ -17,7 +17,11 @@ def scrape(config_path: str = "competitors.yaml") -> None:
 
     with SessionLocal() as session:
         for company in config.companies:
-            scrape_company(session, company)
+            try:
+                scrape_company(session, company)
+                typer.echo(f"  ✓ {company.name}")
+            except Exception as e:
+                typer.echo(f"  ✗ {company.name}: {e}", err=True)
     typer.echo("Scrape completed.")
 
 
