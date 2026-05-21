@@ -6,6 +6,7 @@ from app.config import load_config
 from app.db.models import Base, ScrapeRun
 from app.db.session import SessionLocal, engine
 from app.services.generate_diff_report import generate_report
+from app.services.generate_jobs_report import generate_jobs_report
 from app.services.generate_stats_report import generate_stats_report
 from app.services.scrape_company import scrape_company
 
@@ -42,6 +43,18 @@ def report() -> None:
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as session:
         typer.echo(generate_report(session))
+
+
+@app.command()
+def jobs(
+    function: str | None = typer.Option(None, "--function", "-f", help="Filter by function tag (e.g. Eng, Product, Clinical)"),
+    domain: str | None = typer.Option(None, "--domain", "-d", help="Filter by domain tag (e.g. prior_auth, fhir, hipaa)"),
+    group_by: str = typer.Option("company", "--group-by", "-g", help="Group by: company, function, or domain"),
+) -> None:
+    """Browse active job postings with optional filters and grouping."""
+    Base.metadata.create_all(bind=engine)
+    with SessionLocal() as session:
+        typer.echo(generate_jobs_report(session, function_filter=function, domain_filter=domain, group_by=group_by))
 
 
 @app.command()
