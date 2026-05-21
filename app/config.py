@@ -4,10 +4,19 @@ import yaml
 from pydantic import BaseModel, Field
 
 
+class SelectorsConfig(BaseModel):
+    job_list: str
+    title: str
+    link: str
+    location: str | None = None
+    department: str | None = None
+
+
 class CompanyConfig(BaseModel):
     name: str
     careers_url: str
     ats_provider: str
+    selectors: SelectorsConfig | None = None
 
 
 class AppConfig(BaseModel):

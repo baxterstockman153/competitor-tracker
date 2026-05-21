@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import CompanyConfig
-from app.db.models import Company, JobPosting, JobSnapshot
+from app.db.models import Company, JobChange, JobPosting, JobSnapshot, ScrapeRun
 from app.scrapers.factory import get_scraper
 
 
@@ -13,7 +13,7 @@ def _hash_description(description: str) -> str:
     return hashlib.sha256(description.encode("utf-8")).hexdigest()
 
 
-def scrape_company(session: Session, company_config: CompanyConfig) -> None:
+def scrape_company(session: Session, company_config: CompanyConfig, scrape_run: ScrapeRun) -> None:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     company = session.scalar(select(Company).where(Company.name == company_config.name))
@@ -26,7 +26,7 @@ def scrape_company(session: Session, company_config: CompanyConfig) -> None:
         session.add(company)
         session.flush()
 
-    scraper = get_scraper(company_config.ats_provider)
+    scraper = get_scraper(company_config.ats_provider, company_config.selectors)
     scraped_jobs = scraper.fetch_jobs(company_config.careers_url)
 
     existing_jobs = session.scalars(
@@ -40,12 +40,14 @@ def scrape_company(session: Session, company_config: CompanyConfig) -> None:
         seen_external_ids.add(scraped_job.external_id)
         description_hash = _hash_description(scraped_job.description)
         job = existing_by_external_id.get(scraped_job.external_id)
+        job_url = str(scraped_job.url)
 
         if job is None:
             job = JobPosting(
                 company_id=company.id,
                 external_id=scraped_job.external_id,
                 title=scraped_job.title,
+                url=job_url,
                 location=scraped_job.location,
                 department=scraped_job.department,
                 current_description_hash=description_hash,
@@ -66,6 +68,17 @@ def scrape_company(session: Session, company_config: CompanyConfig) -> None:
                 scraped_at=now,
             )
             session.add(snapshot)
+
+            change = JobChange(
+                company_id=company.id,
+                job_posting_id=job.id,
+                scrape_run_id=scrape_run.id,
+                change_type="new",
+                title=job.title,
+                url=job_url,
+                created_at=now,
+            )
+            session.add(change)
             continue
 
         description_changed = job.current_description_hash != description_hash
@@ -76,6 +89,7 @@ def scrape_company(session: Session, company_config: CompanyConfig) -> None:
         )
 
         job.title = scraped_job.title
+        job.url = job_url
         job.location = scraped_job.location
         job.department = scraped_job.department
         job.last_seen_at = now
@@ -96,8 +110,28 @@ def scrape_company(session: Session, company_config: CompanyConfig) -> None:
             )
             session.add(snapshot)
 
-    for existing_job in existing_jobs:
-        if existing_job.external_id not in seen_external_ids:
-            existing_job.is_active = False
+        if description_changed:
+            change = JobChange(
+                company_id=company.id,
+                job_posting_id=job.id,
+                scrape_run_id=scrape_run.id,
+                change_type="updated",
+                title=job.title,
+                url=job_url,
+                created_at=now,
+            )
+            session.add(change)
 
-    session.commit()
+    for existing_job in existing_jobs:
+        if existing_job.external_id not in seen_external_ids and existing_job.is_active:
+            existing_job.is_active = False
+            change = JobChange(
+                company_id=company.id,
+                job_posting_id=existing_job.id,
+                scrape_run_id=scrape_run.id,
+                change_type="removed",
+                title=existing_job.title,
+                url=existing_job.url,
+                created_at=now,
+            )
+            session.add(change)

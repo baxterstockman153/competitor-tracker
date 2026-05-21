@@ -2,15 +2,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.analysis.diff import compute_company_diff
-from app.db.models import Company
+from app.db.models import Company, ScrapeRun
 
 
 def generate_report(session: Session) -> str:
+    scrape_run = session.scalar(
+        select(ScrapeRun).order_by(ScrapeRun.started_at.desc()).limit(1)
+    )
+    if scrape_run is None:
+        return "No scrape runs found. Run 'python main.py scrape' first."
+
     companies = session.scalars(select(Company).order_by(Company.name.asc())).all()
 
     blocks: list[str] = []
     for company in companies:
-        diff = compute_company_diff(session, company)
+        diff = compute_company_diff(session, company, scrape_run)
         lines = [
             "=" * 50,
             diff.company_name,

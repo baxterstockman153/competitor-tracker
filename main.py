@@ -1,7 +1,9 @@
+from datetime import datetime, timezone
+
 import typer
 
 from app.config import load_config
-from app.db.models import Base
+from app.db.models import Base, ScrapeRun
 from app.db.session import SessionLocal, engine
 from app.services.generate_diff_report import generate_report
 from app.services.scrape_company import scrape_company
@@ -16,12 +18,20 @@ def scrape(config_path: str = "competitors.yaml") -> None:
     config = load_config(config_path)
 
     with SessionLocal() as session:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        scrape_run = ScrapeRun(started_at=now)
+        session.add(scrape_run)
+        session.flush()
+
         for company in config.companies:
             try:
-                scrape_company(session, company)
+                scrape_company(session, company, scrape_run)
                 typer.echo(f"  ✓ {company.name}")
             except Exception as e:
                 typer.echo(f"  ✗ {company.name}: {e}", err=True)
+
+        scrape_run.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        session.commit()
     typer.echo("Scrape completed.")
 
 
