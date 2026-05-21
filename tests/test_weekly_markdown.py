@@ -7,7 +7,7 @@ from app.db.models import JobPosting, ScrapeRun
 from app.services.generate_weekly_report import generate_weekly_report
 from app.services.scrape_company import scrape_company
 
-from tests.conftest import make_config, make_job, make_scrape_run, scrape_with_jobs
+from tests.conftest import make_config, make_job, scrape_with_jobs
 
 
 class TestMarkdownHeader:

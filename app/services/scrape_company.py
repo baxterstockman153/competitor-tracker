@@ -1,7 +1,7 @@
 import hashlib
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.classification.classifier import classify_job
@@ -14,10 +14,12 @@ def _apply_tags(session: Session, job: JobPosting, title: str, description: str,
     classification = classify_job(title, description, location)
 
     # Delete existing deterministic tags only
-    session.query(JobTag).filter(
-        JobTag.job_posting_id == job.id,
-        JobTag.tag_source == "deterministic",
-    ).delete()
+    session.execute(
+        delete(JobTag).where(
+            JobTag.job_posting_id == job.id,
+            JobTag.tag_source == "deterministic",
+        )
+    )
 
     tags = [
         JobTag(job_posting_id=job.id, tag_type="function", tag_value=classification.function, tag_source="deterministic"),

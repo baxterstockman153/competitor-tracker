@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy import select
@@ -8,6 +8,10 @@ from app.analysis.diff import compute_company_diff
 from app.analysis.signals import StrategicSignal, detect_signals
 from app.analysis.stats import CompanyStats, SummaryStats, compute_summary_stats
 from app.db.models import Company, JobChange, JobPosting, ScrapeRun
+
+# Location lookup keyed by (company_name, title) to avoid collisions
+# when two companies have jobs with the same title.
+LocationLookup = dict[tuple[str, str], str | None]
 
 
 @dataclass
@@ -33,13 +37,16 @@ def build_weekly_report_data(session: Session) -> WeeklyReportData | None:
     signals = detect_signals(session, scrape_run)
     diffs = {c.name: compute_company_diff(session, c, scrape_run) for c in companies}
 
-    # Location lookup
+    # Location lookup keyed by (company_name, title)
     rows = session.execute(
-        select(JobChange.company_id, JobChange.title, JobPosting.location)
+        select(Company.name, JobChange.title, JobPosting.location)
+        .join(Company, JobChange.company_id == Company.id)
         .outerjoin(JobPosting, JobChange.job_posting_id == JobPosting.id)
         .where(JobChange.scrape_run_id == scrape_run.id)
     ).all()
-    title_to_location: dict[str, str | None] = {row.title: row.location for row in rows}
+    location_lookup: LocationLookup = {
+        (row.name, row.title): row.location for row in rows
+    }
 
     # Movers
     movers = [c for c in stats.companies if c.net_change != 0]
@@ -50,7 +57,7 @@ def build_weekly_report_data(session: Session) -> WeeklyReportData | None:
     for company_name, diff in sorted(diffs.items()):
         if diff.new_jobs:
             new_jobs[company_name] = [
-                (title, title_to_location.get(title)) for title in diff.new_jobs
+                (title, location_lookup.get((company_name, title))) for title in diff.new_jobs
             ]
 
     # Removed jobs

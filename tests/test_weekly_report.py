@@ -4,8 +4,7 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy import select
 
-from app.config import CompanyConfig
-from app.db.models import Company, JobPosting, JobTag, ScrapeRun
+from app.db.models import JobPosting, ScrapeRun
 from app.services.generate_weekly_report import generate_weekly_report
 from app.services.scrape_company import scrape_company
 

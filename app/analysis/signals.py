@@ -1,9 +1,9 @@
 from dataclasses import dataclass
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import JobChange, JobTag, ScrapeRun
+from app.db.models import Company, JobChange, JobTag, ScrapeRun
 
 
 _SEVERITY_ORDER = {"significant": 0, "notable": 1, "info": 2}
@@ -46,7 +46,6 @@ def detect_signals(session: Session, scrape_run: ScrapeRun) -> list[StrategicSig
     }
 
     # Get company names
-    from app.db.models import Company
     companies = {
         c.id: c.name
         for c in session.scalars(select(Company)).all()
@@ -61,6 +60,8 @@ def detect_signals(session: Session, scrape_run: ScrapeRun) -> list[StrategicSig
 
     # Leadership hires: VP or C-Suite seniority
     for tag in tags:
+        if tag.job_posting_id not in change_info:
+            continue
         if tag.tag_type == "seniority" and tag.tag_value in ("VP", "C-Suite"):
             company_id, title = change_info[tag.job_posting_id]
             company_name = companies.get(company_id, "Unknown")
@@ -76,6 +77,8 @@ def detect_signals(session: Session, scrape_run: ScrapeRun) -> list[StrategicSig
     function_counts: dict[int, dict[str, int]] = {}
 
     for tag in tags:
+        if tag.job_posting_id not in change_info:
+            continue
         company_id = change_info[tag.job_posting_id][0]
         if tag.tag_type == "domain":
             domain_counts.setdefault(company_id, {})
@@ -98,11 +101,11 @@ def detect_signals(session: Session, scrape_run: ScrapeRun) -> list[StrategicSig
     # Function burst: 3+ new jobs in same function
     for company_id, counts in function_counts.items():
         company_name = companies.get(company_id, "Unknown")
-        for func, count in counts.items():
+        for function_name, count in counts.items():
             if count >= 3:
                 signals.append(StrategicSignal(
                     company_name=company_name,
-                    signal=f"{company_name} added {count} {func} roles",
+                    signal=f"{company_name} added {count} {function_name} roles",
                     severity="notable",
                 ))
 

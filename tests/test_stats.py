@@ -5,8 +5,7 @@ from sqlalchemy import select
 
 from app.analysis.stats import compute_company_stats, compute_summary_stats
 from app.config import CompanyConfig
-from app.db.models import Company, JobChange, JobPosting, ScrapeRun
-from app.schemas.job import NormalizedJob
+from app.db.models import Company, JobPosting, ScrapeRun
 from app.services.scrape_company import scrape_company
 
 from tests.conftest import make_config, make_job, make_scrape_run, scrape_with_jobs
